@@ -1,0 +1,128 @@
+name: Build Re-ARranged Mod
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 19 * * *' # 台灣時間早上三點 (UTC 19:00)
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Mod Source
+        uses: actions/checkout@v4
+        with:
+          repository: edward9s/Shattered-Master-Mode
+          path: mod
+
+      - name: Check Version & Release Status
+        id: check
+        run: |
+          REPO="Hoto-Mocha/Re-ARranged-Pixel-Dungeon"
+          UPSTREAM_TAG=$(curl -s https://api.github.com/repos/$REPO/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+          MOD_VER=$(python mod/scripts/extract_version.py mod/core/src/main/java/com/spd/mod/ModGame.java)
+          EXPECTED_TAG="Re-ARranged-${UPSTREAM_TAG}-m${MOD_VER}"
+          
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://api.github.com/repos/${{ github.repository }}/releases/tags/$EXPECTED_TAG)
+          
+          if [ "$STATUS" == "200" ] && [ "${{ github.event_name }}" == "schedule" ]; then
+            echo "Release $EXPECTED_TAG exists. Skipping scheduled build."
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "Proceeding with build for $EXPECTED_TAG"
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "UPSTREAM_TAG=$UPSTREAM_TAG" >> $GITHUB_ENV
+            echo "MOD_VER=$MOD_VER" >> $GITHUB_ENV
+            echo "EXPECTED_TAG=$EXPECTED_TAG" >> $GITHUB_ENV
+            echo "UPSTREAM_REPO=$REPO" >> $GITHUB_ENV
+          fi
+
+      - name: Checkout Re-ARranged Source
+        uses: actions/checkout@v4
+        if: steps.check.outputs.skip == 'false'
+        with:
+          repository: ${{ env.UPSTREAM_REPO }}
+          ref: ${{ env.UPSTREAM_TAG }}
+          path: spd_src
+
+      - uses: actions/setup-java@v4
+        if: steps.check.outputs.skip == 'false'
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v3
+        if: steps.check.outputs.skip == 'false'
+
+      - name: Patch & Merge
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          python mod/scripts/patch_android.py
+          python mod/scripts/inject_mod.py spd_src/core/src/main/java/com/shatteredpixel/shatteredpixeldungeon/windows/WndGame.java
+          
+          cp -a mod/core spd_src/ 2>/dev/null || true
+          cp -a mod/android spd_src/ 2>/dev/null || true
+          cp -a mod/desktop spd_src/ 2>/dev/null || true
+          cp -a mod/assets spd_src/ 2>/dev/null || true
+          
+          python mod/scripts/patch_depth.py 26
+
+      - name: Compile
+        if: steps.check.outputs.skip == 'false'
+        working-directory: ./spd_src
+        run: |
+          chmod +x ./gradlew
+          ./gradlew android:assembleRelease :desktop:release
+
+      - name: Install Old Build Tools for Signer
+        if: steps.check.outputs.skip == 'false'
+        run: $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "build-tools;29.0.3"
+
+      - name: Sign Android
+        if: steps.check.outputs.skip == 'false'
+        uses: r0adkll/sign-android-release@v1
+        id: sign
+        with:
+          releaseDirectory: spd_src/android/build/outputs/apk/release
+          signingKeyBase64: ${{ secrets.KEYSTORE_BASE64 }}
+          alias: ${{ secrets.KEY_ALIAS }}
+          keyStorePassword: ${{ secrets.STORE_PASSWORD }}
+          keyPassword: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Package
+        if: steps.check.outputs.skip == 'false'
+        run: |
+          mkdir -p out
+          
+          APK_NAME="${{ env.EXPECTED_TAG }}-Android.apk"
+          JAR_NAME="${{ env.EXPECTED_TAG }}-Java.jar"
+          
+          cp "${{ steps.sign.outputs.signedReleaseFile }}" "out/$APK_NAME"
+          
+          COMPILED_JAR=$(find spd_src/desktop/build/libs -name "desktop-*.jar" | head -n 1)
+          if [ -n "$COMPILED_JAR" ]; then
+            cp "$COMPILED_JAR" "out/$JAR_NAME"
+          else
+            echo "Error: Compiled desktop JAR not found"
+            exit 1
+          fi
+
+      - name: Upload Artifacts (Manual Only)
+        if: steps.check.outputs.skip == 'false' && github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Release-${{ env.EXPECTED_TAG }}
+          path: out/*
+
+      - name: Create Release (Schedule Only)
+        if: steps.check.outputs.skip == 'false' && github.event_name == 'schedule'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.EXPECTED_TAG }}
+          name: ${{ env.EXPECTED_TAG }}
+          body: "This is an automatic build based on the official version."
+          files: out/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
