@@ -68,6 +68,15 @@ jobs:
           
           python mod/scripts/patch_depth.py 26
 
+          # 解決 AAPT: error: resource string/game_services_project_id not found
+          mkdir -p spd_src/android/src/main/res/values
+          cat <<EOF > spd_src/android/src/main/res/values/secrets.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <string name="game_services_project_id">000000000000</string>
+          </resources>
+          EOF
+
       - name: Compile
         if: steps.check.outputs.skip == 'false'
         working-directory: ./spd_src
