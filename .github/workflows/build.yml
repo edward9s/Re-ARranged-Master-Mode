@@ -66,7 +66,7 @@ jobs:
           cp -a mod/desktop spd_src/ 2>/dev/null || true
           cp -a mod/assets spd_src/ 2>/dev/null || true
           
-          python mod/scripts/patch_depth.py 26
+          python mod/scripts/patch_depth.py 31
 
           # 解決 AAPT: error: resource string/game_services_project_id not found
           mkdir -p spd_src/android/src/main/res/values
