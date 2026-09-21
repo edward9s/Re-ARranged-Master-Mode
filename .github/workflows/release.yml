@@ -50,8 +50,7 @@ jobs:
                 echo "skip=true" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
-              echo "::error::Release $EXPECTED_TAG already exists. Wait for an upstream/SMM version change before publishing again."
-              exit 1
+              echo "Release $EXPECTED_TAG already exists; manual run will rebuild and update it."
               ;;
             404)
               ;;
@@ -148,7 +147,7 @@ jobs:
             exit 1
           fi
 
-      - name: Create Release
+      - name: Create or update Release
         if: steps.check.outputs.skip == 'false'
         uses: softprops/action-gh-release@v2
         with:
@@ -156,5 +155,7 @@ jobs:
           name: ${{ env.EXPECTED_TAG }}
           body: "Automatically built from Re-ARranged Pixel Dungeon ${{ env.UPSTREAM_TAG }} with Shattered Master Mode m${{ env.MOD_VER }}."
           files: out/*
+          overwrite_files: true
+          fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
