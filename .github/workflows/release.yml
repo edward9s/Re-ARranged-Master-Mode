@@ -3,7 +3,7 @@ name: Release Re-ARranged Mod
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 19 * * *' # 台灣時間早上三點 (UTC 19:00)
+    - cron: '0 5 * * *' # 台灣時間下午一點 (UTC 05:00)
 
 jobs:
   build:
