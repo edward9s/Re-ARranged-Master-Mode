@@ -12,12 +12,6 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout Mod Source
-        uses: actions/checkout@v4
-        with:
-          repository: edward9s/Shattered-Master-Mode
-          path: mod
-
       - name: Resolve Versions
         id: check
         env:
@@ -31,11 +25,17 @@ jobs:
             exit 1
           fi
 
-          MOD_VER=$(python mod/scripts/extract_version.py mod/core/src/main/java/com/spd/mod/ModGame.java)
-          if [ -z "$MOD_VER" ]; then
-            echo "::error::Unable to resolve the SMM version."
+          SMM_REPO="edward9s/Shattered-Master-Mode"
+          SMM_TAG=$(gh api "repos/$SMM_REPO/releases/latest" --jq '.tag_name // empty')
+          if [ -z "$SMM_TAG" ]; then
+            echo "::error::Unable to resolve the latest SMM release tag."
             exit 1
           fi
+          if [[ ! "$SMM_TAG" =~ -m([0-9]+(\.[0-9]+)*)$ ]]; then
+            echo "::error::Unexpected SMM release tag format: $SMM_TAG"
+            exit 1
+          fi
+          MOD_VER="${BASH_REMATCH[1]}"
           EXPECTED_TAG="Re-ARranged-${UPSTREAM_TAG}-m${MOD_VER}"
 
           STATUS=$(curl -sS -o /tmp/wrapper-release.json -w "%{http_code}" \
@@ -64,9 +64,19 @@ jobs:
           echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "UPSTREAM_TAG=$UPSTREAM_TAG" >> "$GITHUB_ENV"
           echo "MOD_VER=$MOD_VER" >> "$GITHUB_ENV"
+          echo "SMM_TAG=$SMM_TAG" >> "$GITHUB_ENV"
           echo "EXPECTED_TAG=$EXPECTED_TAG" >> "$GITHUB_ENV"
           echo "UPSTREAM_REPO=$REPO" >> "$GITHUB_ENV"
           echo "Resolved $EXPECTED_TAG"
+
+      - name: Checkout SMM Source
+        uses: actions/checkout@v4
+        if: steps.check.outputs.skip == 'false'
+        with:
+          repository: edward9s/Shattered-Master-Mode
+          ref: ${{ env.SMM_TAG }}
+          path: mod
+
       - name: Checkout Re-ARranged Source
         uses: actions/checkout@v4
         if: steps.check.outputs.skip == 'false'
