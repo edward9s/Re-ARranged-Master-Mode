@@ -25,6 +25,34 @@ jobs:
             exit 1
           fi
 
+          SOURCE_BUILD_GRADLE=$(gh api \
+            -H "Accept: application/vnd.github.raw" \
+            "repos/$REPO/contents/build.gradle?ref=$UPSTREAM_TAG")
+          SOURCE_VERSION=$(printf '%s\n' "$SOURCE_BUILD_GRADLE" | python -c '
+import re, sys
+text = sys.stdin.read()
+base = re.search(r"^\s*appVersionName\s*=\s*['\"]([^'\"]+)['\"]", text, re.M)
+if not base:
+    raise SystemExit(1)
+version = base.group(1)
+for suffix in re.findall(r"^\s*appVersionName\s*\+=\s*['\"]([^'\"]+)['\"]", text, re.M):
+    version += suffix
+print(version)
+')
+          if [ -z "$SOURCE_VERSION" ]; then
+            echo "::error::Unable to resolve Re-ARranged source version from build.gradle at $UPSTREAM_TAG."
+            exit 1
+          fi
+
+          TAG_VERSION=$(printf '%s' "$UPSTREAM_TAG" | sed -E 's/^v//; s/_based_v/_based_/')
+          SOURCE_CANON=$(printf '%s' "$SOURCE_VERSION" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]//g')
+          TAG_CANON=$(printf '%s' "$TAG_VERSION" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]//g')
+          if [ "$SOURCE_CANON" != "$TAG_CANON" ]; then
+            echo "::error::Re-ARranged release tag $UPSTREAM_TAG does not match public source version $SOURCE_VERSION."
+            exit 1
+          fi
+          echo "Verified Re-ARranged source version $SOURCE_VERSION against release tag $UPSTREAM_TAG."
+
           SMM_REPO="edward9s/Shattered-Master-Mode"
           SMM_TAG=$(gh api "repos/$SMM_REPO/releases/latest" --jq '.tag_name // empty')
           if [ -z "$SMM_TAG" ]; then
