@@ -28,17 +28,13 @@ jobs:
           SOURCE_BUILD_GRADLE=$(gh api \
             -H "Accept: application/vnd.github.raw" \
             "repos/$REPO/contents/build.gradle?ref=$UPSTREAM_TAG")
-          SOURCE_VERSION=$(printf '%s\n' "$SOURCE_BUILD_GRADLE" | python -c '
-import re, sys
-text = sys.stdin.read()
-base = re.search(r"^\s*appVersionName\s*=\s*['\"]([^'\"]+)['\"]", text, re.M)
-if not base:
-    raise SystemExit(1)
-version = base.group(1)
-for suffix in re.findall(r"^\s*appVersionName\s*\+=\s*['\"]([^'\"]+)['\"]", text, re.M):
-    version += suffix
-print(version)
-')
+          SOURCE_VERSION_BASE=$(printf '%s\n' "$SOURCE_BUILD_GRADLE" \
+            | sed -nE "s/^[[:space:]]*appVersionName[[:space:]]*=[[:space:]]*'([^']+)'.*/\1/p" \
+            | head -n 1)
+          SOURCE_VERSION_SUFFIX=$(printf '%s\n' "$SOURCE_BUILD_GRADLE" \
+            | sed -nE "s/^[[:space:]]*appVersionName[[:space:]]*\+=[[:space:]]*'([^']+)'.*/\1/p" \
+            | tr -d '\n')
+          SOURCE_VERSION="${SOURCE_VERSION_BASE}${SOURCE_VERSION_SUFFIX}"
           if [ -z "$SOURCE_VERSION" ]; then
             echo "::error::Unable to resolve Re-ARranged source version from build.gradle at $UPSTREAM_TAG."
             exit 1
