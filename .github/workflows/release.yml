@@ -181,6 +181,15 @@ jobs:
             exit 1
           fi
 
+      - name: Verify direct release files
+        if: steps.check.outputs.skip == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "out/${EXPECTED_TAG}-Android.apk"
+          test -f "out/${EXPECTED_TAG}-Java.jar"
+          test "$(find out -maxdepth 1 -type f | wc -l)" -eq 2
+
       - name: Move existing release tag to this build
         if: steps.check.outputs.skip == 'false' && github.event_name == 'workflow_dispatch'
         env:
