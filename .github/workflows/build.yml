@@ -3,11 +3,15 @@ name: Build Re-ARranged Artifacts
 on:
   workflow_dispatch:
 
+concurrency:
+  group: build-test
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
 
     steps:
       - name: Checkout Mod Source
@@ -110,19 +114,51 @@ jobs:
             echo "Error: Compiled desktop JAR not found"
             exit 1
           fi
+      - name: Verify test build files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "out/${EXPECTED_TAG}-Android.apk"
+          test -f "out/${EXPECTED_TAG}-Java.jar"
+          test "$(find out -maxdepth 1 -type f | wc -l)" -eq 2
 
-      - name: Upload Android APK
-        uses: actions/upload-artifact@v4
-        with:
-          retention-days: 3
-          name: ${{ env.EXPECTED_TAG }}-Android
-          path: out/${{ env.EXPECTED_TAG }}-Android.apk
-          if-no-files-found: error
+      - name: Publish rolling test release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TEST_TAG: build-test
+        run: |
+          set -euo pipefail
+          notes=$(printf 'Latest successful manual test build.\n\nBuild commit: %s\nUpstream: %s\nSMM: m%s\n' \
+            "$GITHUB_SHA" "$UPSTREAM_TAG" "$MOD_VER")
+          if gh release view "$TEST_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$TEST_TAG" out/* --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$TEST_TAG" --repo "$GITHUB_REPOSITORY" \
+              --title "Test build" --notes "$notes" --prerelease
+          else
+            gh release create "$TEST_TAG" out/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Test build" \
+              --notes "$notes" \
+              --prerelease \
+              --latest=false
+          fi
 
-      - name: Upload Java JAR
-        uses: actions/upload-artifact@v4
-        with:
-          retention-days: 3
-          name: ${{ env.EXPECTED_TAG }}-Java
-          path: out/${{ env.EXPECTED_TAG }}-Java.jar
-          if-no-files-found: error
+          # Remove APK/JAR files from obsolete test builds.
+          while IFS='|' read -r asset_id asset_name; do
+            case "$asset_name" in
+              *.apk|*.jar)
+                if [[ ! -f "out/$asset_name" ]]; then
+                  gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id"
+                fi
+                ;;
+            esac
+          done < <(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TEST_TAG" \
+            --jq '.assets[] | "\(.id)|\(.name)"')
+
+          # Keep the test tag at the commit that produced the latest test files.
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/git/refs/tags/$TEST_TAG" \
+            -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          actual_sha=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TEST_TAG" --jq '.object.sha')
+          test "$actual_sha" = "$GITHUB_SHA"
